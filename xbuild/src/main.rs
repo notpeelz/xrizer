@@ -108,11 +108,12 @@ fn main() {
             .extension()
             .expect("build shared library should have an extension"),
     );
-    match std::os::unix::fs::symlink(&lib_path, vrclient_path) {
-        Ok(_) => (),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-        err => {
-            eprintln!("Failed to create vrclient symlink: {err:?}");
+    match std::fs::copy(&lib_path, &vrclient_path) {
+        Ok(_) => {
+            println!("Copied library from {:?} to {:?}", lib_path, vrclient_path);
+        }
+        Err(e) => {
+            eprintln!("Failed to copy vrclient library: {e}");
             std::process::exit(1);
         }
     }
