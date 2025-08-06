@@ -1,4 +1,5 @@
 use nanoserde::DeJson;
+use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -29,6 +30,29 @@ enum Message {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("xbuild - Build tool for xrizer OpenVR runtime");
+        println!("\nUsage: xbuild [OPTIONS] [CARGO_BUILD_ARGS]");
+        println!("\nOptions:");
+        println!("  -d, --distribution    Copy libraries instead of symlinking (for distribution)");
+        println!("  -h, --help           Show this help message");
+        println!("\nAll other arguments are passed directly to cargo build.");
+        std::process::exit(0);
+    }
+
+    let distribution_mode = args
+        .iter()
+        .any(|arg| arg == "--distribution" || arg == "-d");
+
+    // Remove custom args before passing to cargo
+    let cargo_args: Vec<String> = args
+        .into_iter()
+        .skip(1)
+        .filter(|arg| arg != "--distribution" && arg != "-d")
+        .collect();
+
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = Command::new(cargo)
         .args([
@@ -38,7 +62,7 @@ fn main() {
             "-p",
             "xrizer",
         ])
-        .args(std::env::args_os().skip(1))
+        .args(cargo_args)
         .stdout(Stdio::piped())
         .spawn()
         .expect("Failed to call cargo");
@@ -108,13 +132,60 @@ fn main() {
             .extension()
             .expect("build shared library should have an extension"),
     );
-    match std::fs::copy(&lib_path, &vrclient_path) {
-        Ok(_) => {
-            println!("Copied library from {:?} to {:?}", lib_path, vrclient_path);
+
+    if distribution_mode {
+        // Copy mode for distribution
+        println!("Using distribution mode (copying libraries)");
+        match std::fs::copy(&lib_path, &vrclient_path) {
+            Ok(_) => {
+                println!("Copied library from {:?} to {:?}", lib_path, vrclient_path);
+            }
+            Err(e) => {
+                eprintln!("Failed to copy vrclient library: {e}");
+                std::process::exit(1);
+            }
         }
-        Err(e) => {
-            eprintln!("Failed to copy vrclient library: {e}");
-            std::process::exit(1);
+    } else {
+        // Symlink mode for development (default)
+        println!("Using development mode (symlinking libraries)");
+
+        // Create symlink based on platform
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(&lib_path, &vrclient_path);
+
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_file(&lib_path, &vrclient_path);
+
+        match symlink_result {
+            Ok(_) => {
+                println!("Created symlink from {:?} to {:?}", vrclient_path, lib_path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Remove existing file/symlink and retry
+                if let Err(e) = std::fs::remove_file(&vrclient_path) {
+                    eprintln!("Failed to remove existing vrclient file: {e}");
+                    std::process::exit(1);
+                }
+
+                #[cfg(unix)]
+                let retry_result = std::os::unix::fs::symlink(&lib_path, &vrclient_path);
+
+                #[cfg(windows)]
+                let retry_result = std::os::windows::fs::symlink_file(&lib_path, &vrclient_path);
+
+                if let Err(e) = retry_result {
+                    eprintln!("Failed to create vrclient symlink: {e}");
+                    std::process::exit(1);
+                }
+                println!(
+                    "Recreated symlink from {:?} to {:?}",
+                    vrclient_path, lib_path
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to create vrclient symlink: {e}");
+                std::process::exit(1);
+            }
         }
     }
 
