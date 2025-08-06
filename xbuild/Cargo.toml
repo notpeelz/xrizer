@@ -7,4 +7,5 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+clap = { version = "4.5.43", features = ["cargo", "derive"] }
 nanoserde = { version = "0.2.0-beta", default-features = false, features = ["std", "json"]}

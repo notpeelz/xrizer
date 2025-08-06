@@ -1,5 +1,5 @@
+use clap::{command, Parser};
 use nanoserde::DeJson;
-use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -29,29 +29,21 @@ enum Message {
     Unknown,
 }
 
+/// Build tool for xrizer OpenVR runtime
+#[derive(Parser, Debug)]
+#[command()]
+struct Args {
+    /// Copy libraries instead of symlinking (for distribution)
+    #[arg(short, long)]
+    distribution: bool,
+
+    /// Arguments to pass to `cargo build`
+    #[arg(last = true)]
+    cargo_build_args: Vec<String>,
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("xbuild - Build tool for xrizer OpenVR runtime");
-        println!("\nUsage: xbuild [OPTIONS] [CARGO_BUILD_ARGS]");
-        println!("\nOptions:");
-        println!("  -d, --distribution    Copy libraries instead of symlinking (for distribution)");
-        println!("  -h, --help           Show this help message");
-        println!("\nAll other arguments are passed directly to cargo build.");
-        std::process::exit(0);
-    }
-
-    let distribution_mode = args
-        .iter()
-        .any(|arg| arg == "--distribution" || arg == "-d");
-
-    // Remove custom args before passing to cargo
-    let cargo_args: Vec<String> = args
-        .into_iter()
-        .skip(1)
-        .filter(|arg| arg != "--distribution" && arg != "-d")
-        .collect();
+    let args = Args::parse();
 
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = Command::new(cargo)
@@ -62,7 +54,7 @@ fn main() {
             "-p",
             "xrizer",
         ])
-        .args(cargo_args)
+        .args(args.cargo_build_args)
         .stdout(Stdio::piped())
         .spawn()
         .expect("Failed to call cargo");
@@ -133,7 +125,7 @@ fn main() {
             .expect("build shared library should have an extension"),
     );
 
-    if distribution_mode {
+    if args.distribution {
         // Copy mode for distribution
         println!("Using distribution mode (copying libraries)");
         match std::fs::copy(&lib_path, &vrclient_path) {
